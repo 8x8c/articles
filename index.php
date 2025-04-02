@@ -90,6 +90,10 @@ HTML;
             body.classList.toggle('dark-mode');
             localStorage.setItem('theme', body.classList.contains('dark-mode') ? 'dark' : 'light');
         }
+        function toggleCommentForm() {
+            const container = document.getElementById('commentFormContainer');
+            container.style.display = (container.style.display === 'none' || container.style.display === '') ? 'block' : 'none';
+        }
         window.addEventListener('DOMContentLoaded', () => {
             if (localStorage.getItem('theme') === 'dark') {
                 document.body.classList.add('dark-mode');
@@ -108,11 +112,14 @@ HTML;
     <div class="article-body">{$articleText}</div>
 
     <h2 class="comments-title">Comments</h2>
-    <form action="../index.php?comment=1&id={$articleId}" method="post" class="comment-form">
-        <label for="comment" class="comment-label">Add a comment:</label>
-        <textarea name="comment" id="comment" required class="comment-textarea"></textarea>
-        <button type="submit" class="comment-submit">Submit Comment</button>
-    </form>
+    <button onclick="toggleCommentForm()" class="new-article-btn">Add Comment</button>
+    <div id="commentFormContainer" style="display: none;">
+        <form action="../index.php?comment=1&id={$articleId}" method="post" class="comment-form">
+            <label for="comment" class="comment-label">Add a comment:</label>
+            <textarea name="comment" id="comment" required class="comment-textarea"></textarea>
+            <button type="submit" class="comment-submit">Submit Comment</button>
+        </form>
+    </div>
     <div id="comment-list" class="comment-list">{$comments}</div>
 </div>
 </body>
@@ -200,6 +207,10 @@ HTML;
             body.classList.toggle('dark-mode');
             localStorage.setItem('theme', body.classList.contains('dark-mode') ? 'dark' : 'light');
         }
+        function toggleCommentForm() {
+            const container = document.getElementById('commentFormContainer');
+            container.style.display = (container.style.display === 'none' || container.style.display === '') ? 'block' : 'none';
+        }
         window.addEventListener('DOMContentLoaded', () => {
             if (localStorage.getItem('theme') === 'dark') {
                 document.body.classList.add('dark-mode');
@@ -217,11 +228,14 @@ HTML;
     {$media}
     <div class="article-body">{$safeContent}</div>
     <h2 class="comments-title">Comments</h2>
-    <form action="../index.php?comment=1&id={$articleId}" method="post" class="comment-form">
-        <label for="comment" class="comment-label">Add a comment:</label>
-        <textarea name="comment" id="comment" required class="comment-textarea"></textarea>
-        <button type="submit" class="comment-submit">Submit Comment</button>
-    </form>
+    <button onclick="toggleCommentForm()" class="new-article-btn">Add Comment</button>
+    <div id="commentFormContainer" style="display: none;">
+        <form action="../index.php?comment=1&id={$articleId}" method="post" class="comment-form">
+            <label for="comment" class="comment-label">Add a comment:</label>
+            <textarea name="comment" id="comment" required class="comment-textarea"></textarea>
+            <button type="submit" class="comment-submit">Submit Comment</button>
+        </form>
+    </div>
     <div id="comment-list" class="comment-list"></div>
 </div>
 </body>
@@ -301,4 +315,3 @@ $articles = $db->query('SELECT id, title FROM articles ORDER BY id DESC');
 </div>
 </body>
 </html>
-
