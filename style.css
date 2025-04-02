@@ -148,21 +148,36 @@ body {
 .articles-list {
     list-style: none;
     padding-left: 0;
+    text-align: center;
 }
 .article-link-item {
-    margin-bottom: 8px;
+    display: inline-block;
+    margin: 8px;
 }
+/* Professional article link styling as compact buttons with wrapping */
 .article-link {
-    text-decoration: none;
-    color: #0066cc;
-    display: block;
-    word-break: break-word;
-    overflow-wrap: break-word;
-    white-space: normal;
+    display: inline-block;
     max-width: 100%;
+    padding: 10px 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    text-decoration: none;
+    color: #333;
+    transition: background-color 0.3s, border-color 0.3s;
+    white-space: normal;
+    word-break: break-word;
 }
 .article-link:hover {
-    text-decoration: underline;
+    background-color: #f7f7f7;
+    border-color: #ccc;
+}
+.dark-mode .article-link {
+    color: #28a745;
+    border: 1px solid #555;
+}
+.dark-mode .article-link:hover {
+    background-color: #333;
+    border-color: #28a745;
 }
 
 /* Article page layout */
@@ -214,6 +229,7 @@ body {
 .comments-title {
     margin-top: 20px;
     font-size: 1.4rem;
+    text-align: center;
 }
 .comment-form {
     max-width: 480px;
@@ -264,16 +280,20 @@ body {
     margin-left: auto;
     margin-right: auto;
 }
+/* Updated Comment Item Styling for a Professional Look */
 .comment-item {
     background: #e5e5e5;
-    padding: 10px;
-    margin-bottom: 8px;
-    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     white-space: pre-wrap;
     word-wrap: break-word;
     overflow-wrap: break-word;
 }
 .dark-mode .comment-item {
     background: #3c3c3c;
+    border: 1px solid #555;
     color: #ddd;
 }
