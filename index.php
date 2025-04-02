@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-// <!-- index.php -->
+
 $db = new SQLite3(__DIR__ . '/articles.db');
 $db->exec('PRAGMA journal_mode = WAL;');
 $db->exec('CREATE TABLE IF NOT EXISTS articles (
@@ -15,72 +15,179 @@ $db->exec('CREATE TABLE IF NOT EXISTS comments (
     created_at TEXT NOT NULL
 )');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $title = trim($_POST['title'] ?? '');
-    $articleText = trim($_POST['articleText'] ?? '');
-    if ($title === '' || $articleText === '') {
-        header('Location: ' . $_SERVER['PHP_SELF']);
+// 🔁 Handle Comment Submission
+if (isset($_GET['comment']) && isset($_GET['id']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $articleId = (int) $_GET['id'];
+    $commentText = trim($_POST['comment'] ?? '');
+
+    if ($articleId > 0 && $commentText !== '') {
+        $stmt = $db->prepare('INSERT INTO comments (article_id, comment_text, created_at) 
+                              VALUES (:aid, :ctext, :cat)');
+        $stmt->bindValue(':aid', $articleId, SQLITE3_INTEGER);
+        $stmt->bindValue(':ctext', $commentText, SQLITE3_TEXT);
+        $stmt->bindValue(':cat', date('Y-m-d H:i:s'), SQLITE3_TEXT);
+        $stmt->execute();
+    }
+
+    // Rebuild article page
+    $articleQuery = $db->prepare('SELECT title, content FROM articles WHERE id = :aid LIMIT 1');
+    $articleQuery->bindValue(':aid', $articleId, SQLITE3_INTEGER);
+    $articleRow = $articleQuery->execute()->fetchArray(SQLITE3_ASSOC);
+
+    if (!$articleRow) {
+        header('Location: index.php');
         exit;
     }
 
-    // Insert article
+    $title = htmlspecialchars($articleRow['title'], ENT_QUOTES, 'UTF-8');
+    $articleText = nl2br(htmlspecialchars($articleRow['content'], ENT_QUOTES, 'UTF-8'));
+    $articleDir = __DIR__ . '/' . $articleId;
+
+    $uploadedMedia = '';
+    $dirContents = scandir($articleDir);
+    foreach ($dirContents as $item) {
+        if ($item !== '.' && $item !== '..' && $item !== 'index.html') {
+            $safeItem = htmlspecialchars($item, ENT_QUOTES, 'UTF-8');
+            $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+            if (in_array($ext, ['mp4','webm'])) {
+                $uploadedMedia = <<<HTML
+<div class="media-container">
+    <video controls class="video-player">
+        <source src="{$safeItem}" type="video/{$ext}">
+    </video>
+</div>
+HTML;
+            } else {
+                $uploadedMedia = <<<HTML
+<div class="media-container">
+    <img src="{$safeItem}" alt="Uploaded" class="image-uploaded">
+</div>
+HTML;
+            }
+        }
+    }
+
+    // Load comments
+    $comments = '';
+    $stmt = $db->prepare('SELECT comment_text FROM comments WHERE article_id = :aid ORDER BY comment_id ASC');
+    $stmt->bindValue(':aid', $articleId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+        $safe = nl2br(htmlspecialchars($row['comment_text'], ENT_QUOTES, 'UTF-8'));
+        $comments .= "<div class=\"comment-item\">{$safe}</div>\n";
+    }
+
+    $html = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{$title}</title>
+    <link rel="stylesheet" href="../style.css">
+    <script>
+        function toggleTheme() {
+            const body = document.body;
+            body.classList.toggle('dark-mode');
+            localStorage.setItem('theme', body.classList.contains('dark-mode') ? 'dark' : 'light');
+        }
+        window.addEventListener('DOMContentLoaded', () => {
+            if (localStorage.getItem('theme') === 'dark') {
+                document.body.classList.add('dark-mode');
+            }
+        });
+    </script>
+</head>
+<body>
+<div class="article-top-bar">
+    <button onclick="window.location.href='../index.php'" class="back-button">&laquo; Back</button>
+    <button onclick="toggleTheme()" class="theme-button">Toggle Theme</button>
+</div>
+<div class="article-container">
+    <h1 class="article-title">{$title}</h1>
+    {$uploadedMedia}
+    <div class="article-body">{$articleText}</div>
+
+    <h2 class="comments-title">Comments</h2>
+    <form action="../index.php?comment=1&id={$articleId}" method="post" class="comment-form">
+        <label for="comment" class="comment-label">Add a comment:</label>
+        <textarea name="comment" id="comment" required class="comment-textarea"></textarea>
+        <button type="submit" class="comment-submit">Submit Comment</button>
+    </form>
+    <div id="comment-list" class="comment-list">{$comments}</div>
+</div>
+</body>
+</html>
+HTML;
+
+    file_put_contents("{$articleDir}/index.html", $html);
+    header("Location: {$articleId}/index.html");
+    exit;
+}
+
+// ✍️ Handle new article submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $title = trim($_POST['title'] ?? '');
+    $content = trim($_POST['articleText'] ?? '');
+    if ($title === '' || strlen($title) > 100 || $content === '') {
+        header('Location: index.php');
+        exit;
+    }
+
     $stmt = $db->prepare('INSERT INTO articles (title, content) VALUES (:title, :content)');
     $stmt->bindValue(':title', $title, SQLITE3_TEXT);
-    $stmt->bindValue(':content', $articleText, SQLITE3_TEXT);
+    $stmt->bindValue(':content', $content, SQLITE3_TEXT);
     $stmt->execute();
     $articleId = $db->lastInsertRowID();
 
-    // Create folder for the article
-    $articleDir = __DIR__ . '/' . $articleId;
-    mkdir($articleDir, 0775);
+    $dir = __DIR__ . '/' . $articleId;
+    mkdir($dir, 0775);
 
-    // Handle file upload (20MB max, allow only certain types)
+    $uploadedFile = '';
     if (!empty($_FILES['upload']['name'])) {
-        if ($_FILES['upload']['size'] > 20 * 1024 * 1024) {
-            // File too large
-            header('Location: ' . $_SERVER['PHP_SELF']);
-            exit;
+        if ($_FILES['upload']['size'] <= 20 * 1024 * 1024) {
+            $ext = strtolower(pathinfo($_FILES['upload']['name'], PATHINFO_EXTENSION));
+            $allowed = ['png','jpg','jpeg','gif','webp','mp4','webm'];
+            if (in_array($ext, $allowed, true)) {
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $mime = $finfo->file($_FILES['upload']['tmp_name']);
+                $validMime = [
+                    'image/jpeg','image/png','image/gif','image/webp',
+                    'video/mp4','video/webm'
+                ];
+                if (in_array($mime, $validMime, true)) {
+                    $uploadedFile = basename($_FILES['upload']['name']);
+                    move_uploaded_file($_FILES['upload']['tmp_name'], "{$dir}/{$uploadedFile}");
+                }
+            }
         }
-        $allowedExtensions = ['png','jpg','jpeg','gif','webp','mp4','webm'];
-        $tmpName = $_FILES['upload']['tmp_name'];
-        $fileName = basename($_FILES['upload']['name']);
-        $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-
-        // Validate extension
-        if (!in_array($ext, $allowedExtensions, true)) {
-            header('Location: ' . $_SERVER['PHP_SELF']);
-            exit;
-        }
-
-        // Optionally, check MIME with finfo for additional security
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mimeType = $finfo->file($tmpName);
-        // Basic check to ensure it's image/video
-        $allowedMimes = [
-            'image/jpeg',
-            'image/png',
-            'image/gif',
-            'image/webp',
-            'video/mp4',
-            'video/webm'
-        ];
-        if (!in_array($mimeType, $allowedMimes, true)) {
-            header('Location: ' . $_SERVER['PHP_SELF']);
-            exit;
-        }
-
-        $destination = $articleDir . '/' . $fileName;
-        move_uploaded_file($tmpName, $destination);
-        $uploadedFileName = $fileName;
-    } else {
-        $uploadedFileName = '';
     }
 
-    $safeTitle   = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
-    $safeArticle = nl2br(htmlspecialchars($articleText, ENT_QUOTES, 'UTF-8'));
+    // Rebuild static HTML
+    $safeTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+    $safeContent = nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8'));
 
-    // Build the article HTML
-    $htmlContent = <<<HTML
+    $media = '';
+    if ($uploadedFile !== '') {
+        $ext = strtolower(pathinfo($uploadedFile, PATHINFO_EXTENSION));
+        $src = htmlspecialchars($uploadedFile, ENT_QUOTES, 'UTF-8');
+        if (in_array($ext, ['mp4','webm'])) {
+            $media = <<<HTML
+<div class="media-container">
+    <video controls class="video-player">
+        <source src="{$src}" type="video/{$ext}">
+    </video>
+</div>
+HTML;
+        } else {
+            $media = <<<HTML
+<div class="media-container">
+    <img src="{$src}" alt="Uploaded" class="image-uploaded">
+</div>
+HTML;
+        }
+    }
+
+    $html = <<<HTML
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,11 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         function toggleTheme() {
             const body = document.body;
             body.classList.toggle('dark-mode');
-            if (body.classList.contains('dark-mode')) {
-                localStorage.setItem('theme', 'dark');
-            } else {
-                localStorage.setItem('theme', 'light');
-            }
+            localStorage.setItem('theme', body.classList.contains('dark-mode') ? 'dark' : 'light');
         }
         window.addEventListener('DOMContentLoaded', () => {
             if (localStorage.getItem('theme') === 'dark') {
@@ -111,56 +214,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </div>
 <div class="article-container">
     <h1 class="article-title">{$safeTitle}</h1>
-    <div class="article-body">{$safeArticle}</div>
-HTML;
-
-    if ($uploadedFileName !== '') {
-        $mediaName = htmlspecialchars($uploadedFileName, ENT_QUOTES, 'UTF-8');
-        $extension = strtolower(pathinfo($mediaName, PATHINFO_EXTENSION));
-        if ($extension === 'mp4' || $extension === 'webm') {
-            $htmlContent .= <<<HTML
-
-    <div class="media-container">
-        <video controls class="video-player">
-            <source src="{$mediaName}" type="video/{$extension}">
-            Your browser does not support the video tag.
-        </video>
-    </div>
-HTML;
-        } else {
-            $htmlContent .= <<<HTML
-
-    <div class="media-container">
-        <img src="{$mediaName}" alt="Uploaded" class="image-uploaded">
-    </div>
-HTML;
-        }
-    }
-
-    $htmlContent .= <<<HTML
-
+    {$media}
+    <div class="article-body">{$safeContent}</div>
     <h2 class="comments-title">Comments</h2>
-    <form action="../comment.php?id={$articleId}" method="post" class="comment-form">
-        <label for="comment" class="comment-label">Add a comment:</label><br>
-        <textarea name="comment" id="comment" rows="4" cols="50" required class="comment-textarea"></textarea><br><br>
+    <form action="../index.php?comment=1&id={$articleId}" method="post" class="comment-form">
+        <label for="comment" class="comment-label">Add a comment:</label>
+        <textarea name="comment" id="comment" required class="comment-textarea"></textarea>
         <button type="submit" class="comment-submit">Submit Comment</button>
     </form>
-
-    <div id="comment-list" class="comment-list">
-        <!-- Comments will appear here -->
-    </div>
+    <div id="comment-list" class="comment-list"></div>
 </div>
 </body>
 </html>
 HTML;
 
-    file_put_contents($articleDir . '/index.html', $htmlContent);
-
-    header('Location: ' . $_SERVER['PHP_SELF']);
+    file_put_contents("{$dir}/index.html", $html);
+    header("Location: index.php");
     exit;
 }
 
-// Display existing articles
+// 🧾 Display homepage
 $articles = $db->query('SELECT id, title FROM articles ORDER BY id DESC');
 ?>
 <!DOCTYPE html>
@@ -170,28 +243,20 @@ $articles = $db->query('SELECT id, title FROM articles ORDER BY id DESC');
     <title>Chess Articles</title>
     <link rel="stylesheet" href="style.css">
     <script>
-    function toggleNewArticleForm() {
-        const formContainer = document.getElementById('newArticleFormContainer');
-        if (formContainer.style.display === 'none' || formContainer.style.display === '') {
-            formContainer.style.display = 'block';
-        } else {
-            formContainer.style.display = 'none';
+        function toggleNewArticleForm() {
+            const f = document.getElementById('newArticleFormContainer');
+            f.style.display = f.style.display === 'block' ? 'none' : 'block';
         }
-    }
-    function toggleTheme() {
-        const body = document.body;
-        body.classList.toggle('dark-mode');
-        if (body.classList.contains('dark-mode')) {
-            localStorage.setItem('theme', 'dark');
-        } else {
-            localStorage.setItem('theme', 'light');
+        function toggleTheme() {
+            const body = document.body;
+            body.classList.toggle('dark-mode');
+            localStorage.setItem('theme', body.classList.contains('dark-mode') ? 'dark' : 'light');
         }
-    }
-    window.addEventListener('DOMContentLoaded', () => {
-        if (localStorage.getItem('theme') === 'dark') {
-            document.body.classList.add('dark-mode');
-        }
-    });
+        window.addEventListener('DOMContentLoaded', () => {
+            if (localStorage.getItem('theme') === 'dark') {
+                document.body.classList.add('dark-mode');
+            }
+        });
     </script>
 </head>
 <body>
@@ -201,28 +266,24 @@ $articles = $db->query('SELECT id, title FROM articles ORDER BY id DESC');
         <button onclick="toggleTheme()" class="theme-button">Toggle Theme</button>
     </div>
 
-    <button type="button" class="new-article-btn" onclick="toggleNewArticleForm()">New Article</button>
+    <button class="new-article-btn" onclick="toggleNewArticleForm()">New Article</button>
 
     <div id="newArticleFormContainer" style="display: none;">
         <form action="" method="post" enctype="multipart/form-data" class="article-form">
             <div class="form-group">
-                <label for="title" class="form-label">Article Title:</label><br>
+                <label for="title" class="form-label">Article Title:</label>
                 <input type="text" name="title" id="title" required class="form-input" maxlength="100">
             </div>
             <div class="form-group">
-                <label for="articleText" class="form-label">Article Text:</label><br>
-                <textarea name="articleText" id="articleText" rows="6" cols="60" required class="form-textarea"></textarea>
+                <label for="articleText" class="form-label">Article Text:</label>
+                <textarea name="articleText" id="articleText" required class="form-textarea"></textarea>
             </div>
             <div class="form-group">
-                <label for="upload" class="form-label">Image or Video (optional):</label><br>
-                <input type="file" name="upload" id="upload"
-                    accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm"
-                    class="form-input">
+                <label for="upload" class="form-label">Image or Video (optional):</label>
+                <input type="file" name="upload" id="upload" accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm" class="form-input">
                 <p class="allowed-types">Allowed: PNG, JPG, JPEG, GIF, WEBP, MP4, WEBM. Max 20MB</p>
             </div>
-            <div class="form-group">
-                <button type="submit" class="submit-article-btn">Submit Article</button>
-            </div>
+            <button type="submit" class="submit-article-btn">Submit Article</button>
         </form>
     </div>
 
@@ -240,3 +301,4 @@ $articles = $db->query('SELECT id, title FROM articles ORDER BY id DESC');
 </div>
 </body>
 </html>
+
